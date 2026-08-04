@@ -29,6 +29,9 @@ const dist  = (a, b)   => Math.hypot(a.x - b.x, a.y - b.y);
 const rand  = (min, max) => min + Math.random() * (max - min);
 const randInt = (min, max) => Math.floor(rand(min, max + 1));
 
+const SPEED_BOOST_DURATION = 5;
+const SPEED_ITEM_THRESHOLD = 20;
+
 // ── Bullet ────────────────────────────────────────────────────────────────────
 class Bullet {
   constructor(x, y, angle) {
@@ -141,7 +144,7 @@ class Ship {
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
 
     const ROT   = 3.5;   // rad/s
-    const THRUST = 260;  // px/s²
+    const THRUST = boostTimer > 0 ? 520 : 260;  // px/s² (duplica con boost)
     const DRAG   = 0.987;
 
     if (keys['ArrowLeft'])  this.angle -= ROT * dt;
@@ -235,8 +238,56 @@ class Particle {
   }
 }
 
+// ── Speed Item ───────────────────────────────────────────────────────────────
+class SpeedItem {
+  constructor() {
+    let x, y;
+    const cx = (typeof ship !== 'undefined' && ship && !ship.dead) ? ship.x : W / 2;
+    const cy = (typeof ship !== 'undefined' && ship && !ship.dead) ? ship.y : H / 2;
+    const SAFE = 130;
+    do {
+      x = rand(0, W);
+      y = rand(0, H);
+    } while (Math.hypot(x - cx, y - cy) < SAFE);
+    this.x = x;
+    this.y = y;
+    this.vx = rand(-25, 25);
+    this.vy = rand(-25, 25);
+    this.radius = 10;
+    this.rot = 0;
+    this.rotSpeed = rand(-1, 1);
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.rot += this.rotSpeed * dt;
+  }
+
+  draw() {
+    // Parpadeo sutil
+    if (Math.sin(performance.now() / 120) < -0.55) return;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(10, 0);
+    ctx.lineTo(0, 10);
+    ctx.lineTo(-10, 0);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 // ── Estado del juego ──────────────────────────────────────────────────────────
 let ship, bullets, asteroids, particles;
+let speedItem, boostTimer, asteroidsDestroyed;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
@@ -263,6 +314,9 @@ function initGame() {
   level  = 1;
   state  = 'playing';
   spawnAsteroids(4);
+  speedItem          = null;
+  boostTimer         = 0;
+  asteroidsDestroyed = 0;
 }
 
 function nextLevel() {
@@ -280,6 +334,8 @@ function explode(x, y, count = 8) {
 function killShip() {
   explode(ship.x, ship.y, 14);
   ship.dead = true;
+  boostTimer = 0;
+  speedItem = null;
   lives--;
   if (lives <= 0) {
     state = 'gameover';
@@ -330,11 +386,25 @@ function update(dt) {
         score += POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
+        asteroidsDestroyed++;
+        if (!speedItem && asteroidsDestroyed % SPEED_ITEM_THRESHOLD === 0)
+          speedItem = new SpeedItem();
       }
     }
   }
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
+
+  // Speed item: mover, recoger, boost
+  if (boostTimer > 0) boostTimer -= dt;
+  if (speedItem) {
+    speedItem.update(dt);
+    if (!ship.dead && dist(ship, speedItem) < ship.radius + speedItem.radius) {
+      speedItem.dead = true;
+      boostTimer = SPEED_BOOST_DURATION;
+    }
+  }
+  if (speedItem && speedItem.dead) speedItem = null;
 
   // Nave vs asteroide
   if (ship.invincible <= 0) {
@@ -381,6 +451,14 @@ function drawHUD() {
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
 
+  if (boostTimer > 0) {
+    const w = 140 * (boostTimer / SPEED_BOOST_DURATION);
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(W / 2 - 70, 34, 140, 8);
+    ctx.fillStyle = '#ff0';
+    ctx.fillRect(W / 2 - 70, 34, w, 8);
+  }
 }
 
 function drawOverlay(title, sub) {
@@ -399,6 +477,7 @@ function draw() {
 
   particles.forEach(p => p.draw());
   asteroids.forEach(a => a.draw());
+  if (speedItem) speedItem.draw();
   bullets.forEach(b => b.draw());
   ship.draw();
 
