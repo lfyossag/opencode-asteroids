@@ -32,6 +32,31 @@ const randInt = (min, max) => Math.floor(rand(min, max + 1));
 const SPEED_BOOST_DURATION = 5;
 const SPEED_ITEM_THRESHOLD = 20;
 
+// ── Skins ─────────────────────────────────────────────────────────────────────
+const SKINS = [
+  { name: 'CLASICA',
+    body: [[20,0],[-12,-9],[-7,0],[-12,9]],
+    stroke: '#fff', fill: null,
+    thrust: 'rgba(255,130,0,0.85)', thrustShape: [[-8,-4],[-22,0],[-8,4]] },
+  { name: 'CAZA',
+    body: [[18,0],[-10,-7],[-14,-3],[-6,0],[-14,3],[-10,7]],
+    stroke: '#4cf', fill: 'rgba(80,200,255,0.12)',
+    thrust: 'rgba(120,255,255,0.85)', thrustShape: [[-10,-3],[-24,0],[-10,3]] },
+  { name: 'OVNI',
+    body: [[14,-5],[-14,-5],[-10,0],[-14,5],[14,5],[10,0]],
+    stroke: '#9f6', fill: 'rgba(160,255,100,0.15)',
+    thrust: 'rgba(160,255,100,0.8)', thrustShape: [[-7,-4],[-16,0],[-7,4]] },
+  { name: 'FLECHA',
+    body: [[20,0],[-8,-11],[-2,0],[-8,11]],
+    stroke: '#f44', fill: 'rgba(255,80,80,0.15)',
+    thrust: 'rgba(255,200,80,0.85)', thrustShape: [[-6,-5],[-20,0],[-6,5]] },
+];
+let currentSkin = 0;
+try {
+  const saved = parseInt(localStorage.getItem('asteroids.skin'), 10);
+  if (Number.isInteger(saved) && saved >= 0 && saved < SKINS.length) currentSkin = saved;
+} catch (e) { /* localStorage no disponible */ }
+
 const SHOOTING_STAR_SPEED = 180;
 const SHOOTING_STAR_TTL   = 6;
 const SHOOTING_STAR_POINTS = 250;
@@ -171,7 +196,7 @@ class Ship {
   tryShoot() {
     if (this.shootCooldown > 0 || this.dead) return [];
     this.shootCooldown = 0.2;
-    const NOSE = 21;
+    const NOSE = SKINS[currentSkin].body[0][0];
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
     return [new Bullet(ox, oy, this.angle)];
@@ -182,29 +207,30 @@ class Ship {
     // Parpadeo durante invencibilidad de reaparición
     if (this.invincible > 0 && Math.floor(this.invincible * 8) % 2 === 0) return;
 
+    const skin = SKINS[currentSkin];
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.strokeStyle = '#fff';
+    ctx.strokeStyle = skin.stroke;
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
-    // Silueta clásica: triángulo con muesca trasera
     ctx.beginPath();
-    ctx.moveTo( 20,  0);   // nariz
-    ctx.lineTo(-12, -9);   // ala izquierda
-    ctx.lineTo( -7,  0);   // muesca trasera
-    ctx.lineTo(-12,  9);   // ala derecha
+    ctx.moveTo(skin.body[0][0], skin.body[0][1]);
+    for (let i = 1; i < skin.body.length; i++)
+      ctx.lineTo(skin.body[i][0], skin.body[i][1]);
     ctx.closePath();
     ctx.stroke();
+    if (skin.fill) { ctx.fillStyle = skin.fill; ctx.fill(); }
 
     // Llama del propulsor
     if (this.thrusting && Math.random() > 0.35) {
+      const t = skin.thrustShape;
       ctx.beginPath();
-      ctx.moveTo(-8, -4);
-      ctx.lineTo(-8 - rand(6, 14), 0);
-      ctx.lineTo(-8,  4);
-      ctx.strokeStyle = 'rgba(255, 130, 0, 0.85)';
+      ctx.moveTo(t[0][0], t[0][1]);
+      for (let i = 1; i < t.length; i++) ctx.lineTo(t[i][0], t[i][1]);
+      ctx.closePath();
+      ctx.strokeStyle = skin.thrust;
       ctx.stroke();
     }
 
@@ -446,6 +472,14 @@ function update(dt) {
     bullets.push(...ship.tryShoot());
   }
 
+  // Cambiar skin con teclas 1..N
+  for (let i = 0; i < SKINS.length; i++) {
+    if (pressed('Digit' + (i + 1))) {
+      currentSkin = i;
+      try { localStorage.setItem('asteroids.skin', String(i)); } catch (e) {}
+    }
+  }
+
   ship.update(dt);
   bullets.forEach(b => b.update(dt));
   asteroids.forEach(a => a.update(dt));
@@ -521,17 +555,18 @@ function update(dt) {
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
 function drawLifeIcon(x, y) {
+  const skin = SKINS[currentSkin];
+  const s = 0.42;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(-Math.PI / 2);
-  ctx.strokeStyle = '#fff';
+  ctx.strokeStyle = skin.stroke;
   ctx.lineWidth   = 1.2;
   ctx.lineJoin    = 'round';
   ctx.beginPath();
-  ctx.moveTo( 9,  0);
-  ctx.lineTo(-6, -5);
-  ctx.lineTo(-3,  0);
-  ctx.lineTo(-6,  5);
+  ctx.moveTo(skin.body[0][0] * s, skin.body[0][1] * s);
+  for (let i = 1; i < skin.body.length; i++)
+    ctx.lineTo(skin.body[i][0] * s, skin.body[i][1] * s);
   ctx.closePath();
   ctx.stroke();
   ctx.restore();
@@ -546,6 +581,10 @@ function drawHUD() {
 
   ctx.textAlign = 'center';
   ctx.fillText(`NIVEL ${level}`, W / 2, 26);
+
+  ctx.textAlign = 'left';
+  ctx.font = '13px monospace';
+  ctx.fillText(`SKIN: <${SKINS[currentSkin].name}>  [1-${SKINS.length}]`, 14, H - 16);
 
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
