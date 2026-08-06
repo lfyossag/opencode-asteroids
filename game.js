@@ -63,6 +63,9 @@ const SHOOTING_STAR_POINTS = 250;
 const SHOOTING_STAR_INTERVAL_MIN = 10;
 const SHOOTING_STAR_INTERVAL_MAX = 20;
 
+const TRISHOT_DURATION = 5;
+const TRISHOT_SPREAD  = Math.PI / 180 * 8;   // ~8° en radianes
+
 // ── Escudo ───────────────────────────────────────────────────────────────────
 const SHIELD_MAX_ENERGY     = 5;     // capacidad total en segundos
 const SHIELD_REGEN          = 0.6;   // energía regenerada por segundo
@@ -226,6 +229,13 @@ else if (this.shieldDepleted) this.shieldNeedsRelease = true;
     const NOSE = SKINS[currentSkin].body[0][0];
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
+    if (trishotTimer > 0) {
+      return [
+        new Bullet(ox, oy, this.angle - TRISHOT_SPREAD),
+        new Bullet(ox, oy, this.angle),
+        new Bullet(ox, oy, this.angle + TRISHOT_SPREAD),
+      ];
+    }
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -359,6 +369,58 @@ class SpeedItem {
   }
 }
 
+// ── Triple Shot Item ─────────────────────────────────────────────────────────
+class TriShotItem {
+  constructor() {
+    let x, y;
+    const cx = (typeof ship !== 'undefined' && ship && !ship.dead) ? ship.x : W / 2;
+    const cy = (typeof ship !== 'undefined' && ship && !ship.dead) ? ship.y : H / 2;
+    const SAFE = 130;
+    do {
+      x = rand(0, W);
+      y = rand(0, H);
+    } while (Math.hypot(x - cx, y - cy) < SAFE);
+    this.x = x;
+    this.y = y;
+    this.vx = rand(-25, 25);
+    this.vy = rand(-25, 25);
+    this.radius = 10;
+    this.rot = 0;
+    this.rotSpeed = rand(-1, 1);
+    this.dead = false;
+  }
+
+  update(dt) {
+    this.x = wrap(this.x + this.vx * dt, W);
+    this.y = wrap(this.y + this.vy * dt, H);
+    this.rot += this.rotSpeed * dt;
+  }
+
+  draw() {
+    // Parpadeo sutil
+    if (Math.sin(performance.now() / 120) < -0.55) return;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot);
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    // Triple flecha: tres puntas convergiendo
+    ctx.beginPath();
+    ctx.moveTo( 0,  -2);
+    ctx.lineTo( 8, -10);
+    ctx.lineTo( 4,  -2);
+    ctx.lineTo( 8,   2);
+    ctx.lineTo( 0,   2);
+    ctx.lineTo(-8,   2);
+    ctx.lineTo(-4,  -2);
+    ctx.lineTo(-8, -10);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 // ── Shooting Star (estrella fugaz) ───────────────────────────────────────────
 class ShootingStar {
   constructor() {
@@ -430,6 +492,7 @@ class ShootingStar {
 // ── Estado del juego ──────────────────────────────────────────────────────────
 let ship, bullets, asteroids, particles;
 let speedItem, boostTimer, asteroidsDestroyed;
+let trishotItem, trishotTimer, nextItemIsTrishot;
 let shootingStar, shootingStarTimer;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
@@ -460,6 +523,9 @@ function initGame() {
   speedItem          = null;
   boostTimer         = 0;
   asteroidsDestroyed = 0;
+  trishotItem        = null;
+  trishotTimer       = 0;
+  nextItemIsTrishot  = false;
   shootingStar       = null;
   shootingStarTimer  = rand(SHOOTING_STAR_INTERVAL_MIN, SHOOTING_STAR_INTERVAL_MAX);
 }
@@ -480,7 +546,9 @@ function killShip() {
   explode(ship.x, ship.y, 14);
   ship.dead = true;
   boostTimer = 0;
+  trishotTimer = 0;
   speedItem = null;
+  trishotItem = null;
   shootingStar = null;
   lives--;
   if (lives <= 0) {
@@ -541,8 +609,11 @@ function update(dt) {
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
         asteroidsDestroyed++;
-        if (!speedItem && asteroidsDestroyed % SPEED_ITEM_THRESHOLD === 0)
-          speedItem = new SpeedItem();
+        if (!speedItem && !trishotItem && asteroidsDestroyed % SPEED_ITEM_THRESHOLD === 0) {
+          if (nextItemIsTrishot) trishotItem = new TriShotItem();
+          else                   speedItem    = new SpeedItem();
+          nextItemIsTrishot = !nextItemIsTrishot;
+        }
       }
     }
     if (shootingStar && !b.dead && !shootingStar.dead && dist(b, shootingStar) < shootingStar.radius) {
@@ -565,6 +636,17 @@ function update(dt) {
     }
   }
   if (speedItem && speedItem.dead) speedItem = null;
+
+  // Triple shot item: mover, recoger, duración temporal
+  if (trishotTimer > 0) trishotTimer -= dt;
+  if (trishotItem) {
+    trishotItem.update(dt);
+    if (!ship.dead && dist(ship, trishotItem) < ship.radius + trishotItem.radius) {
+      trishotItem.dead = true;
+      trishotTimer = TRISHOT_DURATION;
+    }
+  }
+  if (trishotItem && trishotItem.dead) trishotItem = null;
 
   // Estrella fugaz: spawn por temporizador aleatorio
   shootingStarTimer -= dt;
@@ -665,7 +747,7 @@ function drawHUD() {
     ctx.fillRect(W / 2 - 70, 34, w, 8);
   }
 
-  // Barra del escudo: visible cuando hay actividad relevante
+// Barra del escudo: visible cuando hay actividad relevante
   if (ship && !ship.dead && (ship.shieldActive || ship.shieldDepleted ||
       ship.shieldEnergy < SHIELD_MAX_ENERGY)) {
     const w = 140 * (ship.shieldEnergy / SHIELD_MAX_ENERGY);
@@ -675,6 +757,15 @@ function drawHUD() {
     ctx.strokeRect(W / 2 - 70, 46, 140, 8);
     ctx.fillStyle = color;
     ctx.fillRect(W / 2 - 70, 46, w, 8);
+  }
+
+  if (trishotTimer > 0) {
+    const w = 140 * (trishotTimer / TRISHOT_DURATION);
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(W / 2 - 70, 58, 140, 8);
+    ctx.fillStyle = '#0ff';
+    ctx.fillRect(W / 2 - 70, 58, w, 8);
   }
 }
 
@@ -696,6 +787,7 @@ function draw() {
   asteroids.forEach(a => a.draw());
   if (shootingStar) shootingStar.draw();
   if (speedItem) speedItem.draw();
+  if (trishotItem) trishotItem.draw();
   bullets.forEach(b => b.draw());
   ship.draw();
 
