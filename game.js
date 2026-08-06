@@ -63,6 +63,14 @@ const SHOOTING_STAR_POINTS = 250;
 const SHOOTING_STAR_INTERVAL_MIN = 10;
 const SHOOTING_STAR_INTERVAL_MAX = 20;
 
+// ── Escudo ───────────────────────────────────────────────────────────────────
+const SHIELD_MAX_ENERGY     = 5;     // capacidad total en segundos
+const SHIELD_REGEN          = 0.6;   // energía regenerada por segundo
+const SHIELD_MIN_RESTART    = 1.5;   // mínimo para reactivar tras agotarse
+const SHIELD_IMPACT_COST    = 1;     // gasto por impacto absorbido
+const SHIELD_DRAIN          = 1;     // consumo continuo por segundo activo
+const SHIELD_RADIUS         = 26;    // radio de colisión/dibujo del escudo
+
 // ── Bullet ────────────────────────────────────────────────────────────────────
 class Bullet {
   constructor(x, y, angle) {
@@ -167,12 +175,31 @@ class Ship {
     this.invincible    = 3;
     this.shootCooldown = 0;
     this.dead          = false;
+    this.shieldEnergy  = SHIELD_MAX_ENERGY;
+    this.shieldActive  = false;
+    this.shieldDepleted = false;
+    this.shieldNeedsRelease = false;
   }
 
   update(dt) {
     if (this.dead) return;
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
+
+// Escudo: activo mientras se mantenga ShiftLeft y haya energía
+this.shieldActive = keys['ShiftLeft'] && this.shieldEnergy > 0
+  && !this.shieldDepleted && !this.shieldNeedsRelease;
+// Energía: drena cuando activo, regenera cuando inactivo
+if (this.shieldActive)
+  this.shieldEnergy = Math.max(0, this.shieldEnergy - SHIELD_DRAIN * dt);
+else if (this.shieldEnergy < SHIELD_MAX_ENERGY)
+  this.shieldEnergy = Math.min(SHIELD_MAX_ENERGY, this.shieldEnergy + SHIELD_REGEN * dt);
+if (this.shieldEnergy === 0) this.shieldDepleted = true;
+if (this.shieldDepleted && this.shieldEnergy >= SHIELD_MIN_RESTART)
+  this.shieldDepleted = false;
+// Requiere soltar Shift tras agotamiento antes de permitir reactivar
+if (!keys['ShiftLeft']) this.shieldNeedsRelease = false;
+else if (this.shieldDepleted) this.shieldNeedsRelease = true;
 
     const ROT   = 3.5;   // rad/s
     const THRUST = boostTimer > 0 ? 520 : 260;  // px/s² (duplica con boost)
@@ -235,6 +262,21 @@ class Ship {
     }
 
     ctx.restore();
+
+    // Escudo: arco cian pulsante alrededor de la nave
+    if (this.shieldActive) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      const pulse = 0.6 + 0.25 * Math.sin(performance.now() / 90);
+      ctx.strokeStyle = this.shieldDepleted
+        ? 'rgba(255,90,90,0.5)'
+        : `rgba(120,200,255,${pulse.toFixed(2)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, SHIELD_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 }
 
@@ -535,17 +577,42 @@ function update(dt) {
     if (shootingStar.dead) shootingStar = null;
   }
 
-  // Nave vs asteroide
-  if (ship.invincible <= 0) {
-    for (const a of asteroids) {
-      if (dist(ship, a) < ship.radius + a.radius * 0.82) {
-        killShip();
-        break;
+  // Nave vs asteroide / estrella fugaz
+  if (ship.invincible <= 0 && !ship.dead) {
+    if (ship.shieldActive) {
+      // Escudo activo: absorbe impactos, fragmenta asteroides sin puntos
+      const newAsteroids = [];
+      for (const a of asteroids) {
+        if (!a.dead && dist(ship, a) < SHIELD_RADIUS + a.radius * 0.82) {
+          a.dead = true;
+          explode(a.x, a.y, a.size * 5);
+          newAsteroids.push(...a.split());
+        }
       }
-    }
-    if (!ship.dead && shootingStar &&
-        dist(ship, shootingStar) < ship.radius + shootingStar.radius * 0.82) {
-      killShip();
+      if (newAsteroids.length > 0) {
+        asteroids = asteroids.concat(newAsteroids);
+        ship.shieldEnergy = Math.max(0, ship.shieldEnergy - newAsteroids.length * SHIELD_IMPACT_COST);
+        if (ship.shieldEnergy === 0) { ship.shieldDepleted = true; ship.shieldNeedsRelease = true; }
+      }
+      if (shootingStar && !shootingStar.dead &&
+          dist(ship, shootingStar) < SHIELD_RADIUS + shootingStar.radius * 0.82) {
+        shootingStar.dead = true;
+        explode(shootingStar.x, shootingStar.y, 16);
+        ship.shieldEnergy = Math.max(0, ship.shieldEnergy - SHIELD_IMPACT_COST);
+        if (ship.shieldEnergy === 0) { ship.shieldDepleted = true; ship.shieldNeedsRelease = true; }
+      }
+    } else {
+      // Sin escudo: comportamiento original
+      for (const a of asteroids) {
+        if (dist(ship, a) < ship.radius + a.radius * 0.82) {
+          killShip();
+          break;
+        }
+      }
+      if (!ship.dead && shootingStar &&
+          dist(ship, shootingStar) < ship.radius + shootingStar.radius * 0.82) {
+        killShip();
+      }
     }
   }
 
@@ -596,6 +663,18 @@ function drawHUD() {
     ctx.strokeRect(W / 2 - 70, 34, 140, 8);
     ctx.fillStyle = '#ff0';
     ctx.fillRect(W / 2 - 70, 34, w, 8);
+  }
+
+  // Barra del escudo: visible cuando hay actividad relevante
+  if (ship && !ship.dead && (ship.shieldActive || ship.shieldDepleted ||
+      ship.shieldEnergy < SHIELD_MAX_ENERGY)) {
+    const w = 140 * (ship.shieldEnergy / SHIELD_MAX_ENERGY);
+    const color = ship.shieldDepleted ? '#f55' : '#7cf';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(W / 2 - 70, 46, 140, 8);
+    ctx.fillStyle = color;
+    ctx.fillRect(W / 2 - 70, 46, w, 8);
   }
 }
 
