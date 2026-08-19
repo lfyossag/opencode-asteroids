@@ -50,6 +50,12 @@ const SKINS = [
     body: [[20,0],[-8,-11],[-2,0],[-8,11]],
     stroke: '#f44', fill: 'rgba(255,80,80,0.15)',
     thrust: 'rgba(255,200,80,0.85)', thrustShape: [[-6,-5],[-20,0],[-6,5]] },
+  { name: 'MORADA',
+    body: [[40,0],[-24,-18],[-14,0],[-24,18]],
+    scale: 2,
+    stroke: '#c39bff', fill: 'rgba(196,155,255,0.15)',
+    thrust: 'rgba(220,150,255,0.85)', thrustShape: [[-16,-8],[-44,0],[-16,8]],
+    scoreMultiplier: 2 },
 ];
 let currentSkin = 0;
 try {
@@ -173,7 +179,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = 12 * (SKINS[currentSkin].scale || 1);
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -283,7 +289,7 @@ else if (this.shieldDepleted) this.shieldNeedsRelease = true;
         : `rgba(120,200,255,${pulse.toFixed(2)})`;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(0, 0, SHIELD_RADIUS, 0, Math.PI * 2);
+      ctx.arc(0, 0, SHIELD_RADIUS * (skin.scale || 1), 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -586,6 +592,7 @@ function update(dt) {
   for (let i = 0; i < SKINS.length; i++) {
     if (pressed('Digit' + (i + 1))) {
       currentSkin = i;
+      ship.radius = 12 * (SKINS[i].scale || 1);
       try { localStorage.setItem('asteroids.skin', String(i)); } catch (e) {}
     }
   }
@@ -600,12 +607,13 @@ function update(dt) {
 
   // Bala vs asteroide / estrella fugaz
   const newAsteroids = [];
+  const scoreMult = SKINS[currentSkin].scoreMultiplier || 1;
   for (const b of bullets) {
     for (const a of asteroids) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
+        score += POINTS[a.size] * scoreMult;
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
         asteroidsDestroyed++;
@@ -619,7 +627,7 @@ function update(dt) {
     if (shootingStar && !b.dead && !shootingStar.dead && dist(b, shootingStar) < shootingStar.radius) {
       b.dead = true;
       shootingStar.dead = true;
-      score += SHOOTING_STAR_POINTS;
+      score += SHOOTING_STAR_POINTS * scoreMult;
       explode(shootingStar.x, shootingStar.y, 16);
     }
   }
@@ -663,9 +671,10 @@ function update(dt) {
   if (ship.invincible <= 0 && !ship.dead) {
     if (ship.shieldActive) {
       // Escudo activo: absorbe impactos, fragmenta asteroides sin puntos
+      const shieldR = SHIELD_RADIUS * (SKINS[currentSkin].scale || 1);
       const newAsteroids = [];
       for (const a of asteroids) {
-        if (!a.dead && dist(ship, a) < SHIELD_RADIUS + a.radius * 0.82) {
+        if (!a.dead && dist(ship, a) < shieldR + a.radius * 0.82) {
           a.dead = true;
           explode(a.x, a.y, a.size * 5);
           newAsteroids.push(...a.split());
@@ -677,7 +686,7 @@ function update(dt) {
         if (ship.shieldEnergy === 0) { ship.shieldDepleted = true; ship.shieldNeedsRelease = true; }
       }
       if (shootingStar && !shootingStar.dead &&
-          dist(ship, shootingStar) < SHIELD_RADIUS + shootingStar.radius * 0.82) {
+          dist(ship, shootingStar) < shieldR + shootingStar.radius * 0.82) {
         shootingStar.dead = true;
         explode(shootingStar.x, shootingStar.y, 16);
         ship.shieldEnergy = Math.max(0, ship.shieldEnergy - SHIELD_IMPACT_COST);
@@ -705,7 +714,7 @@ function update(dt) {
 // ── Draw ──────────────────────────────────────────────────────────────────────
 function drawLifeIcon(x, y) {
   const skin = SKINS[currentSkin];
-  const s = 0.42;
+  const s = 0.42 / (skin.scale || 1);
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(-Math.PI / 2);
