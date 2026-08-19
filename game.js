@@ -50,12 +50,22 @@ const SKINS = [
     body: [[20,0],[-8,-11],[-2,0],[-8,11]],
     stroke: '#f44', fill: 'rgba(255,80,80,0.15)',
     thrust: 'rgba(255,200,80,0.85)', thrustShape: [[-6,-5],[-20,0],[-6,5]] },
+  { name: 'MORADA',
+    body: [[40,0],[-24,-18],[-14,0],[-24,18]],
+    stroke: '#9d4edd', fill: 'rgba(157,78,221,0.15)',
+    thrust: 'rgba(255,120,200,0.85)', thrustShape: [[-16,-8],[-44,0],[-16,8]],
+    scale: 2, doublePoints: true },
 ];
 let currentSkin = 0;
 try {
   const saved = parseInt(localStorage.getItem('asteroids.skin'), 10);
   if (Number.isInteger(saved) && saved >= 0 && saved < SKINS.length) currentSkin = saved;
 } catch (e) { /* localStorage no disponible */ }
+
+// Multiplica puntos por 2 cuando el skin activo lo indica (nave MORADA)
+function pointsFor(base) {
+  return SKINS[currentSkin].doublePoints ? base * 2 : base;
+}
 
 const SHOOTING_STAR_SPEED = 180;
 const SHOOTING_STAR_TTL   = 6;
@@ -173,7 +183,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = 12 * (SKINS[currentSkin].scale || 1);
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -586,6 +596,7 @@ function update(dt) {
   for (let i = 0; i < SKINS.length; i++) {
     if (pressed('Digit' + (i + 1))) {
       currentSkin = i;
+      ship.radius = 12 * (SKINS[i].scale || 1);
       try { localStorage.setItem('asteroids.skin', String(i)); } catch (e) {}
     }
   }
@@ -605,7 +616,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
+        score += pointsFor(POINTS[a.size]);
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
         asteroidsDestroyed++;
@@ -619,7 +630,7 @@ function update(dt) {
     if (shootingStar && !b.dead && !shootingStar.dead && dist(b, shootingStar) < shootingStar.radius) {
       b.dead = true;
       shootingStar.dead = true;
-      score += SHOOTING_STAR_POINTS;
+      score += pointsFor(SHOOTING_STAR_POINTS);
       explode(shootingStar.x, shootingStar.y, 16);
     }
   }
@@ -733,7 +744,9 @@ function drawHUD() {
 
   ctx.textAlign = 'left';
   ctx.font = '13px monospace';
-  ctx.fillText(`SKIN: <${SKINS[currentSkin].name}>  [1-${SKINS.length}]`, 14, H - 16);
+  const skinLabel = `SKIN: <${SKINS[currentSkin].name}>  [1-${SKINS.length}]`
+    + (SKINS[currentSkin].doublePoints ? '  (PUNTOS x2)' : '');
+  ctx.fillText(skinLabel, 14, H - 16);
 
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
