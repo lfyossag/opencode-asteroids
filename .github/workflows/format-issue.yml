@@ -1,0 +1,116 @@
+name: format-issue
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  format-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Label + metadatos del issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const issueNumber = context.payload.issue.number
+            const issue = context.payload.issue
+
+            const text = ((issue.title || '') + '\n' + (issue.body || '')).toLowerCase()
+
+            // ── Detección de label por palabras clave ──────────────
+            const rules = [
+              {
+                label: 'bug',
+                words: ['bug', 'error', 'falla', 'fallo', 'crash', 'rompe', 'roto',
+                        'no funciona', 'broken', 'excepción', 'excepcion']
+              },
+              {
+                label: 'enhancement',
+                words: ['feature', 'mejora', 'añadir', 'anadir', 'agregar', 'nueva',
+                        'propuesta', 'idea', 'solicitud', 'debería', 'deberia']
+              },
+              {
+                label: 'question',
+                words: ['pregunta', 'duda', 'question']
+              }
+            ]
+
+            let label = null
+            for (const rule of rules) {
+              if (rule.words.some(w => text.includes(w))) {
+                label = rule.label
+                break
+              }
+            }
+            if (!label && (issue.title || '').trim().startsWith('¿')) {
+              label = 'question'
+            }
+            if (!label) {
+              label = 'needs-triage'
+            }
+
+            // ── Asegurar que el label exista (needs-triage no es default) ──
+            if (label === 'needs-triage') {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: label })
+              } catch (err) {
+                if (err.status === 404) {
+                  await github.rest.issues.createLabel({
+                    owner, repo, name: label, color: 'fbca04',
+                    description: 'Requiere clasificación manual'
+                  })
+                  core.info(`Label '${label}' creado`)
+                } else {
+                  throw err
+                }
+              }
+            }
+
+            // ── Aplicar labels ─────────────────────────────────────
+            await github.rest.issues.addLabels({
+              owner, repo, issue_number: issueNumber, labels: [label]
+            })
+            core.info(`Label aplicado: ${label}`)
+
+            // ── Metadatos (preserva el body original verbatim) ─────
+            const createdAt = new Date(issue.created_at)
+            const pad = n => String(n).padStart(2, '0')
+            const ts =
+              createdAt.getUTCFullYear() +
+              pad(createdAt.getUTCMonth() + 1) +
+              pad(createdAt.getUTCDate()) +
+              pad(createdAt.getUTCHours()) +
+              pad(createdAt.getUTCMinutes()) +
+              pad(createdAt.getUTCSeconds())
+            const dateStr = createdAt.toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+
+            const author = issue.user.login
+            const issueUrl = issue.html_url
+
+            const meta = [
+              '',
+              '',
+              '<!-- issue-metadata -->',
+              '---',
+              '',
+              '### 📋 Metadatos del issue',
+              '',
+              `- **Número:** #${issueNumber}`,
+              `- **Autor:** @${author} (https://github.com/${author})`,
+              `- **Creado:** ${dateStr}`,
+              `- **Rama sugerida:** \`opencode/issue${issueNumber}-${ts}\``,
+              `- **Link:** ${issueUrl}`,
+              '',
+              '<!-- /issue-metadata -->'
+            ].join('\n')
+
+            const newBody = (issue.body || '') + meta
+
+            await github.rest.issues.update({
+              owner, repo, issue_number: issueNumber, body: newBody
+            })
+            core.info('Metadatos añadidos al cuerpo del issue')
